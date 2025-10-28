@@ -7,6 +7,10 @@ package api
 import (
 	"crypto/md5"
 	"fmt"
+	"github.com/KeepShareOrg/keepshare/hosts/pikpak/model"
+	"github.com/KeepShareOrg/keepshare/pkg/log"
+	"gorm.io/gen"
+	"gorm.io/gorm/clause"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -56,7 +60,7 @@ type API struct {
 	cache *freecache.Cache
 
 	*hosts.Dependencies
-	createLinkLimitList map[string]createLinkLimitData
+	createLinkLimitOptions map[string]createLinkLimitData
 }
 
 // New returns server api instance.
@@ -76,18 +80,129 @@ func New(q *query.Query, d *hosts.Dependencies) *API {
 		resCli = resCli.SetHeader("User-Agent", userAgent)
 	}
 
-	if v := viper.GetStringMap("pikpak.create_link_limit"); len(v) > 0 {
-		api.createLinkLimitList = make(map[string]createLinkLimitData, len(v))
-		for masterUserId, _ := range v {
-			api.createLinkLimitList[masterUserId] = createLinkLimitData{
-				IpNum:    viper.GetUint32(fmt.Sprintf("pikpak.create_link_limit.%s.ip_num", masterUserId)),
-				UnitTime: viper.GetUint32(fmt.Sprintf("pikpak.create_link_limit.%s.unit_time", masterUserId)),
+	autoUpdateCreateLinkLimitOptions(api, q)
+	autoGetCreateLinkLimitOptions(api, q)
+	go api.updatePremiumExpirationBackground()
+	return api
+}
+
+// autoGetCreateLinkLimitList auto get create link limit options.
+func autoGetCreateLinkLimitOptions(api *API, q *query.Query) {
+	fn := func() {
+		createLinkLimitOptions := make(map[string]createLinkLimitData)
+		optionsUidInConfiguration := make([]string, 0)
+		// The options in the configuration file take precedence
+		if v := viper.GetStringMap("pikpak.create_link_limit"); len(v) > 0 {
+			for keepshareUid, _ := range v {
+				optionsUidInConfiguration = append(optionsUidInConfiguration, keepshareUid)
+				createLinkLimitOptions[keepshareUid] = createLinkLimitData{
+					IpNum:    viper.GetUint32(fmt.Sprintf("pikpak.create_link_limit.%s.ip_num", keepshareUid)),
+					UnitTime: viper.GetUint32(fmt.Sprintf("pikpak.create_link_limit.%s.unit_time", keepshareUid)),
+				}
+			}
+		}
+
+		var result []*model.CreateLinkLimit
+		err := q.CreateLinkLimit.Where(q.CreateLinkLimit.KeepshareUserID.NotIn(optionsUidInConfiguration...)).
+			FindInBatches(
+				&result, 100, func(tx gen.Dao, batch int) error {
+					for _, v := range result {
+						createLinkLimitOptions[v.KeepshareUserID] = createLinkLimitData{
+							IpNum:    uint32(v.IPLimit),
+							UnitTime: uint32(v.UnitTime),
+						}
+					}
+					return nil
+				},
+			)
+		if err != nil {
+			log.Errorf("autoGetCreateLinkLimitOptions error: %v", err)
+			return
+		}
+		if len(createLinkLimitOptions) > 0 {
+			api.createLinkLimitOptions = createLinkLimitOptions
+		}
+	}
+	fn()
+
+	go func() {
+		for {
+			time.Sleep(time.Minute)
+			fn()
+		}
+	}()
+}
+
+// autoUpdateCreateLinkLimitOptions auto update create link limit options.
+func autoUpdateCreateLinkLimitOptions(api *API, q *query.Query) {
+	type result struct {
+		MasterUserID string `gorm:"column:master_user_id"`
+		Total        int32  `gorm:"column:t"`
+	}
+	var baseLimitNum int32 = 2000
+	fn := func() {
+		var results []result
+		pf := q.File
+		err := api.Dependencies.Mysql.Table(pf.TableName()).
+			Select(pf.MasterUserID.ColumnName().String(), "count(*) as t").
+			Where(q.File.Status.Eq("PHASE_TYPE_RUNNING")).
+			Group(pf.Status.ColumnName().String()).
+			Group(pf.MasterUserID.ColumnName().String()).
+			Having("t > ?", baseLimitNum).
+			Find(&results).
+			Error
+		if err != nil {
+			log.Errorf("autoUpdateCreateLinkLimitOptions error: %v", err)
+			return
+		}
+
+		shouldLimitMasterIds := make([]string, 0)
+		shouldLimitMapData := make(map[string]result)
+		for _, v := range results {
+			if v.Total > baseLimitNum {
+				shouldLimitMasterIds = append(shouldLimitMasterIds, v.MasterUserID)
+				shouldLimitMapData[v.MasterUserID] = v
+			}
+		}
+
+		// query keepshare user id
+		found, err := q.MasterAccount.Where(q.MasterAccount.UserID.In(shouldLimitMasterIds...)).Find()
+		if err != nil {
+			log.Errorf("autoUpdateCreateLinkLimitOptions find keepshare uid error: %v", err)
+			return
+		}
+
+		now := time.Now()
+		limitOptions := make([]*model.CreateLinkLimit, 0)
+		for _, v := range found {
+			r, ok := shouldLimitMapData[v.UserID]
+			ipLimit := min(10, r.Total/1000)
+			if ok && ipLimit > 0 {
+				limitOptions = append(limitOptions, &model.CreateLinkLimit{
+					KeepshareUserID: v.KeepshareUserID,
+					IPLimit:         ipLimit,
+					UnitTime:        int32(time.Hour.Seconds()) * 24 * 7,
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				})
+			}
+		}
+
+		if len(limitOptions) > 0 {
+			err := q.CreateLinkLimit.Clauses(clause.OnConflict{UpdateAll: true}).Create(limitOptions...)
+			if err != nil {
+				log.Errorf("autoUpdateCreateLinkLimitOptions create limit options error: %v", err)
 			}
 		}
 	}
+	fn()
 
-	go api.updatePremiumExpirationBackground()
-	return api
+	go func() {
+		for {
+			time.Sleep(time.Minute * 5)
+			fn()
+		}
+	}()
 }
 
 type (
@@ -170,5 +285,5 @@ func (api *API) randomEmail() string {
 
 // GetCreateLinkLimitList Gets create link restriction configuration data
 func (api *API) GetCreateLinkLimitList() map[string]createLinkLimitData {
-	return api.createLinkLimitList
+	return api.createLinkLimitOptions
 }

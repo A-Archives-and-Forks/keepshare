@@ -1,6 +1,6 @@
 module github.com/KeepShareOrg/keepshare
 
-go 1.20
+go 1.25.3
 
 require (
 	github.com/alecthomas/participle/v2 v2.0.0
