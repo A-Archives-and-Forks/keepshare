@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/KeepShareOrg/keepshare/hosts/pikpak/model"
 	"github.com/KeepShareOrg/keepshare/pkg/log"
+	"github.com/samber/lo"
 	"gorm.io/gen"
 	"gorm.io/gorm/clause"
 	"math/rand"
@@ -194,6 +195,8 @@ func autoUpdateCreateLinkLimitOptions(api *API, q *query.Query) {
 				log.Errorf("autoUpdateCreateLinkLimitOptions create limit options error: %v", err)
 			}
 		}
+		shouldLimitKeepShareUserIds := lo.Map(limitOptions, func(item *model.CreateLinkLimit, index int) string { return item.KeepshareUserID })
+		q.CreateLinkLimit.Where(q.CreateLinkLimit.KeepshareUserID.NotIn(shouldLimitKeepShareUserIds...)).Delete()
 	}
 	fn()
 
