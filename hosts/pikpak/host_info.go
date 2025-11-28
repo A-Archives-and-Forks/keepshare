@@ -102,24 +102,30 @@ func (p *PikPak) AssignMasterAccount(ctx context.Context, keepShareUserID string
 	return nil
 }
 
-func (p *PikPak) DonateRedeemCode(ctx context.Context, nickname, userID string, redeemCodes []string) error {
-	info, err := p.q.MasterAccount.WithContext(ctx).Where(p.q.MasterAccount.KeepshareUserID.Eq(userID)).Take()
+func (p *PikPak) DonateRedeemCode(ctx context.Context, donor, donorTargetKeepShareID string, redeemCodes []string) error {
+	donorTargetMasterID := ""
+	if donorTargetKeepShareID != "" {
+		info, err := p.q.MasterAccount.WithContext(ctx).Where(p.q.MasterAccount.KeepshareUserID.Eq(donorTargetKeepShareID)).Take()
+		if err == nil {
+			donorTargetMasterID = info.UserID
+		}
+	}
 
 	list := make([]*model.RedeemCode, len(redeemCodes))
 	for idx, redeemCode := range redeemCodes {
 		list[idx] = &model.RedeemCode{
 			Code:                   redeemCode,
 			Status:                 comm.RedeemCodeStatusNotUsed,
-			Donor:                  nickname,
-			DonationTargetMasterID: info.UserID,
+			Donor:                  donor,
+			DonationTargetMasterID: donorTargetMasterID,
 			CreatedAt:              time.Now(),
 			UpdatedAt:              time.Now(),
 		}
 	}
 
-	err = p.q.RedeemCode.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(list...)
+	err := p.q.RedeemCode.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(list...)
 	if err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{"nickname": nickname, "userID": userID}).Error("donate redeem code error")
+		log.WithContext(ctx).WithError(err).WithFields(log.Fields{"donor": donor, "target": donorTargetKeepShareID}).Error("donate redeem code error")
 		return err
 	}
 

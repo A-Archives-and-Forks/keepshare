@@ -56,11 +56,16 @@ const Donation = () => {
       message.error("Please enter the redeem codes");
       return;
     }
+    let redeemCodes = values.redeemCodes.split("\n").filter((item) => item.trim());
+    if (redeemCodes.length === 0) {
+      redeemCodes = values.redeemCodes.split(",").filter((item) => item.trim());
+    }
+
     const { error } = await donateRedeemCode({
       nickname: values.nickname,
       channel_id: values.channelID || "",
       drive: values.drive,
-      redeem_codes: values.redeemCodes.split(",").map((item) => item.trim()),
+      redeem_codes: redeemCodes,
     });
     if (error != null) {
       message.error(error.error);
