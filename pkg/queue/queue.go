@@ -94,7 +94,16 @@ func (q *Queue) Run() {
 			if log.IsDebugEnabled() {
 				log.WithContext(ctx).WithFields(map[string]any{"task_type": task.Type(), "task_payload": task.Payload()}).Debugf("receive task from queue")
 			}
-			return h.ProcessTask(ctx, task)
+			err := h.ProcessTask(ctx, task)
+			if err != nil {
+				retried, _ := asynq.GetRetryCount(ctx)
+				maxRetry, _ := asynq.GetMaxRetry(ctx)
+				if retried >= maxRetry {
+					log.WithContext(ctx).WithField("task_type", task.Type()).Warnf("task failed and revoked after max retries: %v", err)
+					return asynq.RevokeTask
+				}
+			}
+			return err
 		}
 
 		if err := q.svr.Run(asynq.HandlerFunc(f)); err != nil {

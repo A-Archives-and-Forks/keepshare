@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/KeepShareOrg/keepshare/config"
 	"github.com/KeepShareOrg/keepshare/hosts"
 	"github.com/KeepShareOrg/keepshare/hosts/pikpak/comm"
@@ -17,10 +22,6 @@ import (
 	"github.com/KeepShareOrg/keepshare/server/constant"
 	"github.com/hibiken/asynq"
 	"github.com/samber/lo"
-	"math"
-	"strings"
-	"sync"
-	"time"
 )
 
 type TaskManager struct {
@@ -201,6 +202,7 @@ func (t *TaskManager) ppTasksHandler(ctx context.Context, task *asynq.Task) erro
 		shouldSkipErrorKeys := []string{
 			"task not found",
 			"user_blocked",
+			"record not found",
 		}
 		shouldSkip := lo.SomeBy(shouldSkipErrorKeys, func(key string) bool {
 			return strings.Contains(err.Error(), key)
