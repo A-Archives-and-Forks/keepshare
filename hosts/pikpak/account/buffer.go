@@ -43,6 +43,14 @@ func (m *Manager) initConfig() {
 	if v := viper.GetDuration("pikpak.worker_buffer_interval"); v > 0 {
 		m.workerBufferInterval = v
 	}
+
+	if v := viper.GetInt("pikpak.max_premium_workers"); v > 0 {
+		m.maxPremiumWorkers = int64(v)
+	}
+
+	if v := viper.GetInt("pikpak.premium_buffer_size"); v > 0 {
+		m.premiumBufferSize = v
+	}
 }
 
 func (m *Manager) checkMasterBuffer() {

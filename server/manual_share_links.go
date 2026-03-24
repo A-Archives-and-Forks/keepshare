@@ -62,6 +62,7 @@ func createSharedLinks(c *gin.Context) {
 			CreatedBy:          share.LinkToShare,
 			CreatedAt:          time.Now(),
 			UpdatedAt:          time.Now(),
+			LastVisitedAt:      time.Now(),
 			OriginalLinkHash:   lk.Hash(link),
 			HostSharedLinkHash: "",
 			OriginalLink:       link,

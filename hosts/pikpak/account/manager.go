@@ -9,12 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/KeepShareOrg/keepshare/config"
-	"github.com/KeepShareOrg/keepshare/server/constant"
-	"github.com/google/uuid"
 	"net/http"
 	"regexp"
 	"time"
+
+	"github.com/KeepShareOrg/keepshare/config"
+	"github.com/KeepShareOrg/keepshare/server/constant"
+	"github.com/google/uuid"
 
 	"github.com/KeepShareOrg/keepshare/hosts"
 	"github.com/KeepShareOrg/keepshare/hosts/pikpak/api"
@@ -48,6 +49,8 @@ type Manager struct {
 	premiumBufferSize        int
 	premiumBufferConcurrency int
 	premiumBufferInterval    time.Duration
+
+	maxPremiumWorkers int64
 }
 
 // NewManager returns a manager instance.
@@ -69,6 +72,8 @@ func NewManager(q *query.Query, api *api.API, d *hosts.Dependencies) *Manager {
 		premiumBufferSize:        10,
 		premiumBufferConcurrency: 1,
 		premiumBufferInterval:    time.Minute,
+
+		maxPremiumWorkers: 50,
 	}
 
 	m.initConfig()
@@ -260,14 +265,14 @@ func (m *Manager) createWorker(ctx context.Context, master string, status Status
 		if err != nil {
 			return nil, fmt.Errorf("count workers err: %w", err)
 		}
-		if count >= comm.MaxPremiumWorkers {
+		if count >= m.maxPremiumWorkers {
 			// validate donation redeem code not used count
 			if donationCodeCount, err := rc.WithContext(ctx).
 				Where(
 					rc.Status.Eq(comm.RedeemCodeStatusNotUsed),
 					rc.DonationTargetMasterID.Eq(master),
 				).Count(); err != nil || donationCodeCount == 0 {
-				return nil, fmt.Errorf("current number of premium workers is %d, reached the limit: %d", count, comm.MaxPremiumWorkers)
+				return nil, fmt.Errorf("current number of premium workers is %d, reached the limit: %d", count, m.maxPremiumWorkers)
 			}
 		}
 	}

@@ -104,7 +104,7 @@ func Start() error {
 	}
 
 	asyncTaskRunner := NewAsyncTaskRunner()
-	//go asyncTaskRunner.Run()
+	go asyncTaskRunner.Run()
 	go asyncTaskRunner.ListenCompleteFiles()
 	return serveGraceful(srv)
 }

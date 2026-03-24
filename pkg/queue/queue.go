@@ -8,12 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/KeepShareOrg/keepshare/server/constant"
 	"sync"
 	"time"
 
+	"github.com/KeepShareOrg/keepshare/server/constant"
+
 	"github.com/KeepShareOrg/keepshare/pkg/log"
 	"github.com/hibiken/asynq"
+	"github.com/spf13/viper"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -28,6 +30,14 @@ type Queue struct {
 type Client struct {
 	cli *asynq.Client
 	hds *sync.Map
+}
+
+func getAsynqConcurrency() int {
+	v := viper.GetInt("asynq.concurrency")
+	if v > 0 {
+		return v
+	}
+	return 200
 }
 
 // New returns a Queue instance.
@@ -53,7 +63,7 @@ func New(opt redis.Options, queues map[string]int) *Queue {
 	}
 
 	conf := asynq.Config{
-		Concurrency: 100,
+		Concurrency: getAsynqConcurrency(),
 		Logger:      log.Log(),
 		Queues:      queues,
 		RetryDelayFunc: func(n int, e error, t *asynq.Task) time.Duration {
