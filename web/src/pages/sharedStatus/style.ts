@@ -23,7 +23,7 @@ export const ContentWrapper = styled.div`
 
 export const BannerWrapper = styled.div<{ poster?: string }>`
   position: relative;
-  width: 100%;
+  min-width: 324px;
   max-width: 1007px;
   height: 216px;
   border-radius: 16px;
@@ -31,8 +31,6 @@ export const BannerWrapper = styled.div<{ poster?: string }>`
   box-sizing: border-box;
   overflow: hidden;
   margin-top: auto;
-  background: ${(props) =>
-    props.poster ? `url(${props.poster}) no-repeat center/cover` : "#000"};
 
   @media screen and (max-width: 768px) {
     width: calc(100vw - 32px);
@@ -47,6 +45,7 @@ export const BannerImage = styled.img`
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  border-radius: 5px;
 `;
 
 export const SharedInfoBox = styled.div`

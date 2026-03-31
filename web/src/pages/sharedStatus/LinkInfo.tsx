@@ -153,16 +153,14 @@ const LinkInfo = ({ fileInfo, visibleBlocks }: LinkInfoInterface) => {
             <ResourceLink href={link}>{link}</ResourceLink>
           </Space>
           <Space style={{ marginTop: token.margin }}>
-            {
-              document.referrer && (
-                <Button
-                  icon={<ArrowLeftOutlined />}
-                  onClick={() => window.history.back()}
-                >
-                  {t('6Krkunr0j0BHryv1p8p7e')}
-                </Button>
-              )
-            }
+            {document.referrer && (
+              <Button
+                icon={<ArrowLeftOutlined />}
+                onClick={() => window.history.back()}
+              >
+                {t("6Krkunr0j0BHryv1p8p7e")}
+              </Button>
+            )}
             <Button
               type="primary"
               icon={<CopyOutlined />}
