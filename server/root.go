@@ -7,7 +7,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/KeepShareOrg/keepshare/server/constant"
 	"io/fs"
 	"net/http"
 	"net/http/httputil"
@@ -15,9 +14,13 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/KeepShareOrg/keepshare/server/constant"
 
 	"github.com/KeepShareOrg/keepshare/config"
 	"github.com/KeepShareOrg/keepshare/hosts"
@@ -177,6 +180,15 @@ func consoleRouter(router *gin.Engine) {
 	router.GET("/console/*path", func(c *gin.Context) {
 		path := c.Request.URL.Path
 		c.Set(mdw.SkipAccessLog, false)
+		if c.Request.URL.Path == "/console/shared/status" {
+			forbiddenAutoIDs := viper.GetIntSlice("forbidden_auto_id")
+			autoID, err := strconv.Atoi(c.Request.URL.Query().Get("id"))
+			if err == nil && slices.Contains(forbiddenAutoIDs, int(autoID)) {
+				requestID, _ := log.RequestIDFromContext(c.Request.Context())
+				c.Redirect(http.StatusFound, fmt.Sprintf("https://%s/console/shared/wsl-status?id=%d&request_id=%s", config.RootDomain(), autoID, requestID))
+				return
+			}
+		}
 
 		switch {
 		case strings.HasPrefix(path, "/console/assets"):

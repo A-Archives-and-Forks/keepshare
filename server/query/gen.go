@@ -16,44 +16,49 @@ import (
 )
 
 var (
-	Q          = new(Query)
-	Blacklist  *blacklist
-	SharedLink *sharedLink
-	User       *user
+	Q             = new(Query)
+	Blacklist     *blacklist
+	ForbiddenLink *forbiddenLink
+	SharedLink    *sharedLink
+	User          *user
 )
 
 func SetDefault(db *gorm.DB, opts ...gen.DOOption) {
 	*Q = *Use(db, opts...)
 	Blacklist = &Q.Blacklist
+	ForbiddenLink = &Q.ForbiddenLink
 	SharedLink = &Q.SharedLink
 	User = &Q.User
 }
 
 func Use(db *gorm.DB, opts ...gen.DOOption) *Query {
 	return &Query{
-		db:         db,
-		Blacklist:  newBlacklist(db, opts...),
-		SharedLink: newSharedLink(db, opts...),
-		User:       newUser(db, opts...),
+		db:            db,
+		Blacklist:     newBlacklist(db, opts...),
+		ForbiddenLink: newForbiddenLink(db, opts...),
+		SharedLink:    newSharedLink(db, opts...),
+		User:          newUser(db, opts...),
 	}
 }
 
 type Query struct {
 	db *gorm.DB
 
-	Blacklist  blacklist
-	SharedLink sharedLink
-	User       user
+	Blacklist     blacklist
+	ForbiddenLink forbiddenLink
+	SharedLink    sharedLink
+	User          user
 }
 
 func (q *Query) Available() bool { return q.db != nil }
 
 func (q *Query) clone(db *gorm.DB) *Query {
 	return &Query{
-		db:         db,
-		Blacklist:  q.Blacklist.clone(db),
-		SharedLink: q.SharedLink.clone(db),
-		User:       q.User.clone(db),
+		db:            db,
+		Blacklist:     q.Blacklist.clone(db),
+		ForbiddenLink: q.ForbiddenLink.clone(db),
+		SharedLink:    q.SharedLink.clone(db),
+		User:          q.User.clone(db),
 	}
 }
 
@@ -67,24 +72,27 @@ func (q *Query) WriteDB() *Query {
 
 func (q *Query) ReplaceDB(db *gorm.DB) *Query {
 	return &Query{
-		db:         db,
-		Blacklist:  q.Blacklist.replaceDB(db),
-		SharedLink: q.SharedLink.replaceDB(db),
-		User:       q.User.replaceDB(db),
+		db:            db,
+		Blacklist:     q.Blacklist.replaceDB(db),
+		ForbiddenLink: q.ForbiddenLink.replaceDB(db),
+		SharedLink:    q.SharedLink.replaceDB(db),
+		User:          q.User.replaceDB(db),
 	}
 }
 
 type queryCtx struct {
-	Blacklist  IBlacklistDo
-	SharedLink ISharedLinkDo
-	User       IUserDo
+	Blacklist     IBlacklistDo
+	ForbiddenLink IForbiddenLinkDo
+	SharedLink    ISharedLinkDo
+	User          IUserDo
 }
 
 func (q *Query) WithContext(ctx context.Context) *queryCtx {
 	return &queryCtx{
-		Blacklist:  q.Blacklist.WithContext(ctx),
-		SharedLink: q.SharedLink.WithContext(ctx),
-		User:       q.User.WithContext(ctx),
+		Blacklist:     q.Blacklist.WithContext(ctx),
+		ForbiddenLink: q.ForbiddenLink.WithContext(ctx),
+		SharedLink:    q.SharedLink.WithContext(ctx),
+		User:          q.User.WithContext(ctx),
 	}
 }
 

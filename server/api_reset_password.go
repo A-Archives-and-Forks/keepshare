@@ -7,6 +7,9 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/KeepShareOrg/keepshare/config"
 	"github.com/KeepShareOrg/keepshare/pkg/i18n"
 	"github.com/KeepShareOrg/keepshare/pkg/log"
@@ -16,8 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/viper"
 	"gorm.io/gorm"
-	"net/http"
-	"time"
 )
 
 func sendVerificationCode(c *gin.Context) {
@@ -46,10 +47,10 @@ func sendVerificationCode(c *gin.Context) {
 	_, err := query.User.WithContext(ctx).Where(query.User.Email.Eq(req.Email)).Take()
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusBadGateway, mdw.ErrResp(c, "internal", i18n.WithDataMap("error", "user not found")))
+			c.JSON(http.StatusBadRequest, mdw.ErrResp(c, "internal", i18n.WithDataMap("error", "user not found")))
 			return
 		}
-		c.JSON(http.StatusBadGateway, mdw.ErrResp(c, "internal", i18n.WithDataMap("error", err.Error())))
+		c.JSON(http.StatusInternalServerError, mdw.ErrResp(c, "internal", i18n.WithDataMap("error", err.Error())))
 		return
 	}
 

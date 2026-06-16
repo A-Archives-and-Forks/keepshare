@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/samber/lo"
-	"github.com/spf13/viper"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,6 +16,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/samber/lo"
+	"github.com/spf13/viper"
 
 	"github.com/KeepShareOrg/keepshare/config"
 	"github.com/KeepShareOrg/keepshare/hosts"
@@ -126,6 +127,13 @@ func autoSharingLink(c *gin.Context) {
 	report.Set(keyState, lastState)
 	l = l.WithFields(Map{constant.SharedLink: sh.HostSharedLink, constant.ShareStatus: sh.State})
 
+	if !shouldSkipCreateLink {
+		forbiddenAutoIDs := viper.GetIntSlice("forbidden_auto_id")
+		if slices.Contains(forbiddenAutoIDs, int(sh.AutoID)) {
+			shouldSkipCreateLink = true
+		}
+	}
+
 	// if the link refer to the warning channel id, we need redirect to the whatslink info page
 	if shouldSkipCreateLink {
 		l.Debug("redirect to whatslink info page")
@@ -161,7 +169,14 @@ func autoSharingLink(c *gin.Context) {
 	}
 }
 
-// checkForbiddenRules check if the channel and the link are forbidden
+// checkForbiddenRules check if the channel and the link are forbidden.
+//
+// The expensive whatslink.info lookup is executed asynchronously and its result
+// (the forbidden decision) is persisted to MySQL, keyed by (channel_id,
+// original_link_hash). When a decision already exists it is returned
+// immediately. When it does not, this returns false (not forbidden) right away
+// and kicks off a background refresh, so the first visit to a link is not
+// blocked; subsequent visits reuse the stored decision.
 func checkForbiddenRules(ctx context.Context, channelID, link string) bool {
 	type Rule struct {
 		ChannelID       string   `mapstructure:"channel_id"`
@@ -181,16 +196,57 @@ func checkForbiddenRules(ctx context.Context, channelID, link string) bool {
 		return false
 	}
 
-	info, err := queryLinkInfoByWhatsLinks(ctx, link)
-	if err != nil {
-		log.Errorf("query what's link info error: %v", err)
+	hash := lk.Hash(link)
+	if hash == "" {
 		return false
 	}
-	hit = lo.SomeBy(rule.FilenameContain, func(item string) bool {
-		return strings.Contains(strings.ToLower(info.Name), strings.ToLower(item))
+
+	t := query.ForbiddenLink
+	// use the persisted decision if present.
+	record, err := t.WithContext(ctx).Where(
+		t.ChannelID.Eq(channelID),
+		t.OriginalLinkHash.Eq(hash),
+	).Take()
+	if err == nil {
+		return record.Forbidden
+	}
+	if !gormutil.IsNotFoundError(err) {
+		log.Errorf("query forbidden link error: %v", err)
+		return false
+	}
+
+	// no decision yet: let the current request pass and compute & persist the
+	// decision in the background so later visits can reuse it.
+	async.Run(func() {
+		ctx := context.Background()
+		info, err := queryLinkInfoByWhatsLinks(ctx, link)
+		if err != nil {
+			log.Errorf("query what's link info error: %v", err)
+			return
+		}
+		forbidden := lo.SomeBy(rule.FilenameContain, func(item string) bool {
+			return strings.Contains(strings.ToLower(info.Name), strings.ToLower(item))
+		})
+		now := time.Now()
+		row := &model.ForbiddenLink{
+			ChannelID:        channelID,
+			OriginalLinkHash: hash,
+			Forbidden:        forbidden,
+			OriginalLink:     link,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}
+		if err := t.WithContext(ctx).Clauses(clause.OnConflict{
+			DoUpdates: clause.AssignmentColumns([]string{
+				t.Forbidden.ColumnName().String(),
+				t.UpdatedAt.ColumnName().String(),
+			}),
+		}).Create(row); err != nil {
+			log.Errorf("persist forbidden link decision error: %v", err)
+		}
 	})
 
-	return hit
+	return false
 }
 
 type WhatsLinkInfo struct {
