@@ -3,12 +3,13 @@ package account
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/KeepShareOrg/keepshare/hosts/pikpak/api"
 	"github.com/KeepShareOrg/keepshare/pkg/log"
 	"github.com/KeepShareOrg/keepshare/server/constant"
 	"github.com/hibiken/asynq"
 	"gorm.io/gen"
-	"time"
 )
 
 func (m *Manager) keepTokenAliveWorker() {
@@ -21,9 +22,8 @@ func (m *Manager) keepTokenAliveWorker() {
 			for _, uid := range accounts {
 				log.Debugf("should login account user_id: %v", uid)
 				_, err := m.api.CreateToken(ctx, uid, true)
-				if err != nil {
-					log.Errorf("keep alive, create token err: %v", err)
-					// remove invalid password
+				if api.IsInvalidAccountOrPasswordErr(err) {
+					log.WithContext(ctx).Debugf("delete invalid account: %s", uid)
 					ma := m.q.MasterAccount
 					ma.WithContext(ctx).Where(ma.UserID.Eq(uid)).Update(ma.Password, "")
 				}
