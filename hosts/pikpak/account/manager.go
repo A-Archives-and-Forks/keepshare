@@ -110,15 +110,59 @@ func (m *Manager) GetMaster(ctx context.Context, keepShareUserID string) (*model
 	return master, nil
 }
 
+// maxCreateMasterAttempts limits how many invalid buffered master accounts a
+// single sign-up will skip over before giving up.
+const maxCreateMasterAttempts = 3
+
 func (m *Manager) createMaster(ctx context.Context, keepShareUserID string) (*model.MasterAccount, error) {
-	var ret gen.ResultInfo
+	for attempt := 0; attempt < maxCreateMasterAttempts; attempt++ {
+		master, err := m.bindFreeMaster(ctx, keepShareUserID)
+		if err != nil {
+			return nil, err
+		}
+		if master == nil {
+			return nil, errors.New("no enough master account")
+		}
+
+		// Join the referral program OUTSIDE the binding transaction: it signs in
+		// (an external call) and may write the same master row, so running it
+		// inside the transaction would self-deadlock on that row's lock and end
+		// with "Lock wait timeout exceeded".
+		err = m.api.JoinReferral(ctx, master.UserID)
+		if err == nil {
+			return master, nil
+		}
+
+		// The buffered master account is invalid (e.g. banned by PikPak): drop it
+		// from the pool and retry binding another one.
+		if api.IsInvalidAccountOrPasswordErr(err) {
+			log.WithContext(ctx).Warnf("delete invalid master account %s: %v", master.UserID, err)
+			if _, delErr := m.q.MasterAccount.WithContext(ctx).Where(m.q.MasterAccount.UserID.Eq(master.UserID)).Delete(); delErr != nil {
+				return nil, fmt.Errorf("delete invalid master account err: %v, original: %w", delErr, err)
+			}
+			continue
+		}
+
+		// Other failures (network, referral service ...): release the binding so
+		// the account goes back to the pool, then report the error.
+		if _, relErr := m.q.MasterAccount.WithContext(ctx).Where(m.q.MasterAccount.UserID.Eq(master.UserID)).Update(m.q.MasterAccount.KeepshareUserID, ""); relErr != nil {
+			log.WithContext(ctx).Errorf("release master account %s binding err: %v", master.UserID, relErr)
+		}
+		return nil, fmt.Errorf("join referral err: %w", err)
+	}
+
+	return nil, errors.New("no valid master account after retries")
+}
+
+// bindFreeMaster atomically picks the oldest free master account from the buffer
+// pool and binds it to keepShareUserID. It returns nil if the pool is empty.
+func (m *Manager) bindFreeMaster(ctx context.Context, keepShareUserID string) (*model.MasterAccount, error) {
 	var master *model.MasterAccount
 	now := time.Now().Round(time.Second)
 
 	err := m.q.Transaction(func(tx *query.Query) error {
 		t := &tx.MasterAccount
-		var err error
-		ret, err = t.WithContext(ctx).
+		ret, err := t.WithContext(ctx).
 			Where(t.KeepshareUserID.Eq("")).
 			Select(t.KeepshareUserID, t.UpdatedAt).
 			Order(t.CreatedAt).
@@ -134,21 +178,10 @@ func (m *Manager) createMaster(ctx context.Context, keepShareUserID string) (*mo
 			return nil
 		}
 		master, err = t.WithContext(ctx).Where(t.KeepshareUserID.Eq(keepShareUserID), t.UpdatedAt.Eq(now)).Take()
-		if err != nil {
-			return err
-		}
-
-		if err = m.api.JoinReferral(ctx, master.UserID); err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
-
 	if err != nil {
 		return nil, err
-	}
-	if master == nil {
-		return nil, errors.New("no enough master account")
 	}
 	return master, nil
 }
